@@ -68,7 +68,7 @@ function Invoke-Pipeline {
     )
   # Login with the service principal
   Write-Info -Text "Logging in with service principal"
-  Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId
+  Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId | Out-Null # Send this to null so it doesn't clobber the return code
   
   # Start the pipeline and grab the run id so we can check status on it
   Write-Info -Text "Starting pipeline"
