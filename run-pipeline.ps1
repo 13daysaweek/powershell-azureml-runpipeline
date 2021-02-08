@@ -70,6 +70,7 @@ function Invoke-Pipeline {
   Write-Info -Text "Logging in with service principal"
   Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId
   
+  # Start the pipeline and grab the run id so we can check status on it
   Write-Info -Text "Starting pipeline"
   $runId = Start-Pipeline -PipelineId $PipelineId -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
   
@@ -110,4 +111,5 @@ function Write-Error {
 
 $returnCode = Invoke-Pipeline -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId -PipelineId $PipelineId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
 
+Write-Info "Process completed, return code is $returnCode"
 exit $returnCode
