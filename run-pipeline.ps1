@@ -56,6 +56,48 @@ function Get-PipelineStatus {
   return $json.status
 }
 
+function Invoke-Pipeline {
+    param(
+        $ClientId,
+        $ClientSecret,
+        $TenantId,
+        $PipelineId,
+        $ExperimentName,
+        $WorkspaceName,
+        $ResourceGroupName
+    )
+  # Login with the service principal
+  Write-Info -Text "Logging in with service principal"
+  Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId
+  
+  Write-Info -Text "Starting pipeline"
+  $runId = Start-Pipeline -PipelineId $PipelineId -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
+  
+  $completed = $false
+  
+  do {
+      $status = Get-PipelineStatus -RunId $runId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
+    
+      if ($status -eq "completed" -or $status -eq "failed")
+      {
+        Write-Info -Text "Pipeline has reached a final status of $status"
+        $completed = $true
+      } else {
+        Write-Info -Text "Pipeline status is currently $status sleeping for $SecondsBetweenStatusCheck seconds"
+        Start-Sleep $SecondsBetweenStatusCheck
+      }    
+  } until ($completed -eq $true)
+
+  $returnCode
+  if ($status -eq "completed") {
+    $returnCode = 0
+  } else {
+      $returnCode = 1
+  }
+
+  return $returnCode
+}
+
 function Write-Info {
     param($Text)
     Write-Host -ForegroundColor Green $Text
@@ -66,26 +108,6 @@ function Write-Error {
     Write-Host -ForegroundColor Red $Text
 }
 
-# Login with the service principal
-Write-Info -Text "Logging in with service principal"
-Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId
+$returnCode = Invoke-Pipeline -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId -PipelineId $PipelineId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
 
-Write-Info -Text "Starting pipeline"
-$runId = Start-Pipeline -PipelineId $PipelineId -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
-
-$completed = $false
-
-do {
-    $status = Get-PipelineStatus -RunId $runId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
-    Write-Host $status
-    
-    if ($status -eq "completed" -or $status -eq "failed")
-    {
-      $completed = true
-    }
-    
-    Write-Info -Text "Sleeping for $SecondsBetweenStatusCheck seconds"
-    Start-Sleep $SecondsBetweenStatusCheck
-} until ($completed -eq $true)
-
-
+exit $returnCode
