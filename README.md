@@ -1,5 +1,5 @@
-# Put some title here
-This repo contains a PowerShell script that will start an AzureML pipeline and monitor the run's status until the run reaches a final status, either `Completed` or `Failed`.  The script will then return an exit code, either `0` for success or `1 for failed`
+# Running Azure Machine Learning pipelines with PowerShell
+This repo contains a PowerShell script that will start an AzureML pipeline and monitor the run's status until the run reaches a final status, either `Completed` or `Failed`.  The script will then return an exit code, either `0` for success or `1` for failed
 
 ## Usage
 ```powershell
