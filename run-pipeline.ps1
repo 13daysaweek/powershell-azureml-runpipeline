@@ -15,65 +15,70 @@ param(
     [parameter(Mandatory="true")]
     [string] $ResourceGroupName,
     [parameter(Mandatory="true")]
+    [string] $SubscriptionId,
+    [parameter(Mandatory="true")]
+    [string] $Location,
+    [parameter(Mandatory="true")]
     [int] $SecondsBetweenStatusCheck = 60
 )
 
-# Get-RunId parses the response that is returned by az cli when we start an Azure ML pipeline.  The first line of the response contains some text, including a GUID that is the run id.  The subsequent lines are
-# JSON, which contains data about the submitted pipeline run.  This function pulls the guid out of the first line using a regex.
-function Get-RunId {
-    param($submitPipelineResponse)
-    $lines = $submitPipelineResponse -split "\r\n"
-    $runId = $lines[0] | Select-String -Pattern "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}" -AllMatches | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value
+# Start-Pipeline makes a REST call to a pipeline's endpoint to start a pipeline run.  Note that the current implementation assumes the pipeline takes no input
+# parameters.  If the pipeline you wish to start does require parameters then you'll need to refactor some.  This method returns the run id of the started
+# pipeline (guid).
+function Start-Pipeline {
+    param($PipelineId,
+    $WorkspaceName,
+    $ResourceGroupName,
+    $Location,
+    $ExperimentName,
+    $SubscriptionId,
+    $AccessToken)
 
-    return $runId
+    $startPipelineUri = "https://$Location.api.azureml.ms/pipelines/v1.0/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.MachineLearningServices/workspaces/$WorkspaceName/PipelineRuns/PipelineSubmit/$PipelineId"
+    $headers = @{Authorization="Bearer $AccessToken";}
+    $body = @{} | ConvertTo-Json # Pipeline doesn't require any parameters but we need to pass an empty JSON object or we'll get an error :(
+    $response = Invoke-RestMethod -Method POST -Uri $startPipelineUri -Headers $headers -ContentType "application/json" -Body $body
+
+    return $response.Id
 }
 
-# Get-AccessToken logs in the az cli using service principal credentials
+# Get-PipelineStatus makes a REST call to get the status of a pipeline run, specified by the $RunId parameter.  The return value is the status of the pipeline (string)
+function Get-PipelineStatus {
+    param($RunId,
+    $ExperimentName,
+    $WorkspaceName,
+    $SubscriptionId,
+    $Location,
+    $ResourceGroupName,
+    $AccessToken)
+
+    $statusUri = "https://$Location.experiments.azureml.net/history/v1.0/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.MachineLearningServices/workspaces/$WorkspaceName/experiments/$ExperimentName/runs/$RunId"
+    $headers = @{Authorization="Bearer $AccessToken";}
+    $response = Invoke-RestMethod -Method GET -Uri $statusUri -Headers $headers
+
+    return $response.status
+}
+
+# Gets an access token from Azure AD, for the service principal that has access to the AML workspace
 function Get-AccessToken {
     param($ClientId,
     $ClientSecret,
     $TenantId)
+  
+    $loginUri = "https://login.microsoft.com/$TenantId/oauth2/v2.0/token"
+    $postBody = @{client_id=$ClientId;client_secret=$ClientSecret;grant_type='client_credentials';scope='https://management.azure.com/.default'}
+    $response = Invoke-RestMethod -Method POST -Uri $loginUri -Body $postBody -ContentType "application/x-www-form-urlencoded"
 
-    az login --service-principal --username $ClientId --password $ClientSecret --tenant $TenantId
-}
-
-function Invoke-AzCliLogout {
-  az logout
-}
-
-# Start-Pipeline starts the Azure ML pipeline and returns the guid representing the run id in Azure ML.  The run id will be used later to check status of the run
-function Start-Pipeline {
-    param($PipelineId,
-    $WorkspaceName,
-    $ResourceGroupName)
-    $response = az ml run submit-pipeline -i $PipelineId -w $WorkspaceName -g $ResourceGroupName
-
-    $runId = Get-RunId($response)
-
-    return $runId
-}
-
-# Get-PipelineStatus returns the current status of the pipeline run using az cli.  The call to az cli will return JSON, which includes an attribute named
-# status.
-function Get-PipelineStatus {
-  param($RunId,
-  $ExperimentName,
-  $WorkspaceName,
-  $ResourceGroupName)
-
-  $status = az ml run show -r $RunId -w $WorkspaceName -g $ResourceGroupName -e $ExperimentName
-  $json = $status | ConvertFrom-Json
-  return $json.status
+    return $response.access_token
 }
 
 # Invoke-Pipeline performs the following steps
-# 1:  Login to az cli via service principal
+# 1:  Get an Azure AD bearer token for our service principal
 # 2:  Start the pipeline and return the run id
-# 3:  Using the run id, check for status of the run via az cli.
+# 3:  Using the run id, check for status of the run
 # 4:  If the run status is not 'completed' or 'failed', sleep.
 # 5:  Repeate steps 3 and 4 until status is 'cmpleted' or 'failed'
 # 6:  Set return code of script based on pipeline run final status.  'completed' = 0, 'failed' = 1
-# 7:  logout of az cli
 function Invoke-Pipeline {
     param(
         $ClientId,
@@ -82,23 +87,25 @@ function Invoke-Pipeline {
         $PipelineId,
         $ExperimentName,
         $WorkspaceName,
-        $ResourceGroupName
+        $ResourceGroupName,
+        $Location,
+        $SubscriptionId
     )
 
     $returnCode
     try {
         # Login with the service principal
         Write-Info -Text "Logging in with service principal"
-        Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId | Out-Null # Send this to null so it doesn't clobber the return code
+        $accessToken = Get-AccessToken -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId
         
         # Start the pipeline and grab the run id so we can check status on it
         Write-Info -Text "Starting pipeline"
-        $runId = Start-Pipeline -PipelineId $PipelineId -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
-        
+        $runId = Start-Pipeline -PipelineId $PipelineId -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName -Location $Location -ExperimentName $ExperimentName -SubscriptionId $SubscriptionId -AccessToken $accessToken
+        Write-Info "Pipeline started successfully, run id is $runId"
         $completed = $false
-        
+
         do {
-            $status = Get-PipelineStatus -RunId $runId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
+            $status = Get-PipelineStatus -RunId $runId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -SubscriptionId $SubscriptionId -Location $Location -ResourceGroupName $ResourceGroupName -AccessToken $accessToken
             
             if ($status -eq "completed" -or $status -eq "failed")
             {
@@ -120,9 +127,6 @@ function Invoke-Pipeline {
         Write-Error -Text "Error $_"
         $returnCode = 1
     }
-    finally {
-        Invoke-AzCliLogout
-    }
 
     return $returnCode
 }
@@ -137,7 +141,7 @@ function Write-Error {
     Write-Host -ForegroundColor Red $Text
 }
 
-$returnCode = Invoke-Pipeline -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId -PipelineId $PipelineId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName
+$returnCode = Invoke-Pipeline -ClientId $ClientId -ClientSecret $ClientSecret -TenantId $TenantId -PipelineId $PipelineId -ExperimentName $ExperimentName -WorkspaceName $WorkspaceName -ResourceGroupName $ResourceGroupName -Location $Location -SubscriptionId $SubscriptionId
 
 Write-Info "Process completed, return code is $returnCode"
 exit $returnCode
