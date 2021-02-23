@@ -15,11 +15,32 @@ param(
     [parameter(Mandatory="true")]
     [string] $ResourceGroupName,
     [parameter(Mandatory="true")]
+    [string] $SubscriptionId,
+    [parameter(Mandatory="true")]
+    [string] $Location,
+    [parameter(Mandatory="true")]
     [int] $SecondsBetweenStatusCheck = 60
 )
 
+function Get-PipelineStatus {
+    param($RunId,
+    $ExperimentName,
+    $WorkspaceName,
+    $SubscriptionId,
+    $Location,
+    $ResourceGroupName,
+    $AccessToken)
+
+    $statusUri = "https://$Location/expieriments.azureml.net/history/v1.0/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.MachineLearningServices/$WorkspaceName/experiments/$ExperimentName/runs/$RunId"
+    $headers = @{Authorization="Bearer $AccessToken";}
+    $response = Invoke-RestMethod -Method GET -Uri $statusUri -Headers $headers
+    $responseJson = $response | ConvertFrom-Json
+
+    return $responseJson.status
+}
+
 # Get an access token from Azure AD, for the service principal that has access to the AML workspace
-function Get-AzureAdAccessToken {
+function Get-AccessToken {
     param($ClientId,
     $ClientSecret,
     $TenantId)
@@ -42,15 +63,6 @@ function Get-RunId {
     return $runId
 }
 
-# Get-AccessToken logs in the az cli using service principal credentials
-function Get-AccessToken {
-    param($ClientId,
-    $ClientSecret,
-    $TenantId)
-
-    az login --service-principal --username $ClientId --password $ClientSecret --tenant $TenantId
-}
-
 function Invoke-AzCliLogout {
   az logout
 }
@@ -65,19 +77,6 @@ function Start-Pipeline {
     $runId = Get-RunId($response)
 
     return $runId
-}
-
-# Get-PipelineStatus returns the current status of the pipeline run using az cli.  The call to az cli will return JSON, which includes an attribute named
-# status.
-function Get-PipelineStatus {
-  param($RunId,
-  $ExperimentName,
-  $WorkspaceName,
-  $ResourceGroupName)
-
-  $status = az ml run show -r $RunId -w $WorkspaceName -g $ResourceGroupName -e $ExperimentName
-  $json = $status | ConvertFrom-Json
-  return $json.status
 }
 
 # Invoke-Pipeline performs the following steps
