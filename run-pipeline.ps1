@@ -22,6 +22,9 @@ param(
     [int] $SecondsBetweenStatusCheck = 60
 )
 
+# Start-Pipeline makes a REST call to a pipeline's endpoint to start a pipeline run.  Note that the current implementation assumes the pipeline takes no input
+# parameters.  If the pipeline you wish to start does require parameters then you'll need to refactor some.  This method returns the run id of the started
+# pipeline (guid).
 function Start-Pipeline {
     param($PipelineId,
     $WorkspaceName,
@@ -39,6 +42,7 @@ function Start-Pipeline {
     return $response.Id
 }
 
+# Get-PipelineStatus makes a REST call to get the status of a pipeline run, specified by the $RunId parameter.  The return value is the status of the pipeline (string)
 function Get-PipelineStatus {
     param($RunId,
     $ExperimentName,
@@ -49,14 +53,13 @@ function Get-PipelineStatus {
     $AccessToken)
 
     $statusUri = "https://$Location.experiments.azureml.net/history/v1.0/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.MachineLearningServices/workspaces/$WorkspaceName/experiments/$ExperimentName/runs/$RunId"
-    Write-Host $statusUri
     $headers = @{Authorization="Bearer $AccessToken";}
     $response = Invoke-RestMethod -Method GET -Uri $statusUri -Headers $headers
 
     return $response.status
 }
 
-# Get an access token from Azure AD, for the service principal that has access to the AML workspace
+# Gets an access token from Azure AD, for the service principal that has access to the AML workspace
 function Get-AccessToken {
     param($ClientId,
     $ClientSecret,
