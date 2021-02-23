@@ -18,6 +18,20 @@ param(
     [int] $SecondsBetweenStatusCheck = 60
 )
 
+# Get an access token from Azure AD, for the service principal that has access to the AML workspace
+function Get-AzureAdAccessToken {
+    param($ClientId,
+    $ClientSecret,
+    $TenantId)
+  
+    $loginUri = "https://login.microsoft.com/$TenantId/oauth2/v2.0/token"
+    $postBody = @{client_id=$ClientId;client_secret=$ClientSecret;grant_type='client_credentials';scope='https://management.azure.com/.default'}
+    $response = Invoke-RestMethod -Method POST -Uri $loginUri -Body $postBody -ContentType "application/x-www-form-urlencoded"
+    $responseJson = $response | ConvertFrom-Json
+    
+    return $responseJson.access_token
+}
+
 # Get-RunId parses the response that is returned by az cli when we start an Azure ML pipeline.  The first line of the response contains some text, including a GUID that is the run id.  The subsequent lines are
 # JSON, which contains data about the submitted pipeline run.  This function pulls the guid out of the first line using a regex.
 function Get-RunId {
